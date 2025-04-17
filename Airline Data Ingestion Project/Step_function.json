@@ -1,0 +1,82 @@
+{
+    "Comment": "A description of my state machine",
+    "StartAt": "StartCrawler",
+    "States": {
+      "StartCrawler": {
+        "Type": "Task",
+        "Arguments": {
+          "Name": "daily-flights-crawler"
+        },
+        "Resource": "arn:aws:states:::aws-sdk:glue:startCrawler",
+        "Next": "GetCrawler"
+      },
+      "GetCrawler": {
+        "Type": "Task",
+        "Arguments": {
+          "Name": "daily-flights-crawler"
+        },
+        "Resource": "arn:aws:states:::aws-sdk:glue:getCrawler",
+        "Next": "Is_Running?"
+      },
+      "Is_Running?": {
+        "Type": "Choice",
+        "Choices": [
+          {
+            "Next": "Wait",
+            "Condition": "{% $contains($states.input.Crawler.State, \"RUNNING\") %}"
+          }
+        ],
+        "Default": "Glue StartJobRun"
+      },
+      "Glue StartJobRun": {
+        "Type": "Task",
+        "Resource": "arn:aws:states:::glue:startJobRun.sync",
+        "Arguments": {
+          "JobName": "flight_data_ingestion"
+        },
+        "Catch": [
+          {
+            "ErrorEquals": [
+              "States.T"
+            ],
+            "Next": "Failed_Notification"
+          }
+        ],
+        "Next": "Glue_Job_Status"
+      },
+      "Wait": {
+        "Type": "Wait",
+        "Seconds": 5,
+        "Next": "GetCrawler"
+      },
+      "Glue_Job_Status": {
+        "Type": "Choice",
+        "Choices": [
+          {
+            "Next": "Success_Notification",
+            "Condition": "{% $contains($states.input.JobRunState, \"SUCCEEDED\") %}"
+          }
+        ],
+        "Default": "Failed_Notification"
+      },
+      "Success_Notification": {
+        "Type": "Task",
+        "Resource": "arn:aws:states:::sns:publish",
+        "Arguments": {
+          "TopicArn": "arn:aws:sns:us-east-2:<again, your own user id>:send-airline-ingestion-update",
+          "Message": "Glue Job Execution Successful"
+        },
+        "End": true
+      },
+      "Failed_Notification": {
+        "Type": "Task",
+        "Resource": "arn:aws:states:::sns:publish",
+        "Arguments": {
+          "TopicArn": "arn:aws:sns:us-east-2:<you don't listen huh>:send-airline-ingestion-update",
+          "Message": "{% $states.input %}"
+        },
+        "End": true
+      }
+    },
+    "QueryLanguage": "JSONata"
+  }
