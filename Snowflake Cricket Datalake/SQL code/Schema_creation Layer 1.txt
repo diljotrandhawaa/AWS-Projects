@@ -1,0 +1,32 @@
+Schema_creation Layer 1:
+
+create database cricket;
+create schema land;
+create schema raw;
+create schema clean;
+create schema consumption;
+
+show schemas in database cricket
+
+use schema land
+
+create or replace file format my_json_format
+ type = json
+ null_if = ('\\n', 'null', '')
+    strip_outer_array = true
+    comment = 'Json File Format with outer stip array flag true';
+
+create or replace stage my_stg;CRICKET.LAND.MY_STGCRICKET.LAND.MY_STGCRICKET.LAND.MY_JSON_FORMAT
+
+list @my_stg;
+
+select 
+        t.$1:meta::variant as meta, 
+        t.$1:info::variant as info, 
+        t.$1:innings::array as innings, 
+        metadata$filename as file_name,
+        metadata$file_row_number int,
+        metadata$file_content_key text,
+        metadata$file_last_modified stg_modified_ts
+     from  @my_stg/cricket/json/1384410.json (file_format => 'my_json_format') t;
+    

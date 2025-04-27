@@ -1,0 +1,349 @@
+Consumption zone layer 4:
+
+-- Date dimension table
+create or replace table date_dim (
+    date_id int primary key autoincrement,
+    full_dt date,
+    day int,
+    month int,
+    year int,
+    quarter int,
+    dayofweek int,
+    dayofmonth int,
+    dayofyear int,
+    dayofweekname varchar(3), -- to store day names (e.g., "Mon")
+    isweekend boolean -- to indicate if it's a weekend (True/False Sat/Sun both falls under weekend)
+);
+
+-- Referee dimension table
+create or replace table referee_dim (
+    referee_id int primary key autoincrement,
+    referee_name text not null,
+    referee_type text not null
+);
+
+-- Team dimension table
+create or replace table team_dim (
+    team_id int primary key autoincrement,
+    team_name text not null
+);
+
+-- Player dimension table
+create or replace table player_dim (
+    player_id int primary key autoincrement,
+    team_id int not null,
+    player_name text not null
+);
+
+-- Create relationship between Team dimension and Player dimension tables
+alter table cricket.consumption.player_dim
+add constraint fk_team_player_id
+foreign key (team_id)
+references cricket.consumption.team_dim (team_id);
+
+-- Create Venue dimension table
+create or replace table venue_dim (
+    venue_id int primary key autoincrement,
+    venue_name text not null,
+    city text not null,
+    state text,
+    country text,
+    continent text,
+    end_Names text,
+    capacity number,
+    pitch text,
+    flood_light boolean,
+    established_dt date,
+    playing_area text,
+    other_sports text,
+    curator text,
+    lattitude number(10,6),
+    longitude number(10,6)
+);
+
+-- Match dimension table
+create or replace table match_type_dim (
+    match_type_id int primary key autoincrement,
+    match_type text not null
+);
+
+-- Create Match fact table
+CREATE or replace TABLE match_fact (
+    match_id INT PRIMARY KEY,
+    date_id INT NOT NULL,
+    referee_id INT NOT NULL,
+    team_a_id INT NOT NULL,
+    team_b_id INT NOT NULL,
+    match_type_id INT NOT NULL,
+    venue_id INT NOT NULL,
+    total_overs number(3),
+    balls_per_over number(1),
+
+    overs_played_by_team_a number(2),
+    bowls_played_by_team_a number(3),
+    extra_bowls_played_by_team_a number(3),
+    extra_runs_scored_by_team_a number(3),
+    fours_by_team_a number(3),
+    sixes_by_team_a number(3),
+    total_score_by_team_a number(3),
+    wicket_lost_by_team_a number(2),
+
+    overs_played_by_team_b number(2),
+    bowls_played_by_team_b number(3),
+    extra_bowls_played_by_team_b number(3),
+    extra_runs_scored_by_team_b number(3),
+    fours_by_team_b number(3),
+    sixes_by_team_b number(3),
+    total_score_by_team_b number(3),
+    wicket_lost_by_team_b number(2),
+
+    toss_winner_team_id int not null, 
+    toss_decision text not null, 
+    match_result text not null, 
+    winner_team_id int not null,
+
+    CONSTRAINT fk_date FOREIGN KEY (date_id) REFERENCES date_dim (date_id),
+    CONSTRAINT fk_referee FOREIGN KEY (referee_id) REFERENCES referee_dim (referee_id),
+    CONSTRAINT fk_team1 FOREIGN KEY (team_a_id) REFERENCES team_dim (team_id),
+    CONSTRAINT fk_team2 FOREIGN KEY (team_b_id) REFERENCES team_dim (team_id),
+    CONSTRAINT fk_match_type FOREIGN KEY (match_type_id) REFERENCES match_type_dim (match_type_id),
+    CONSTRAINT fk_venue FOREIGN KEY (venue_id) REFERENCES venue_dim (venue_id),
+
+    CONSTRAINT fk_toss_winner_team FOREIGN KEY (toss_winner_team_id) REFERENCES team_dim (team_id),
+    CONSTRAINT fk_winner_team FOREIGN KEY (winner_team_id) REFERENCES team_dim (team_id)
+);
+
+-- Team dimension table data load
+INSERT INTO team_dim(team_name)
+Select DISTINCT team_name from (
+    select first_team as team_name
+    from CRICKET.CLEAN.match_detail_clean
+    UNION ALL
+    select second_team as team_name
+    from CRICKET.CLEAN.match_detail_clean
+) order by team_name
+
+select * from team_dim
+
+-- 
+select Team_name, COUNT(DISTINCT player_name) as player_count from cricket.clean.player_clean_tbl
+GROUP BY TEAM_NAME
+
+select DISTINCT player_name from cricket.clean.player_clean_tbl
+
+select * from cricket.clean.player_clean_tbl
+
+insert into player_dim(team_id, player_name)
+select td.team_id, p.player_name
+from team_dim td
+join cricket.clean.player_clean_tbl p
+on td.team_name = p.team_name
+group by 
+td.team_id, p.player_name;
+
+select * from player_dim
+
+insert into venue_dim(venue_name, city)
+select venue, city
+from cricket.clean.match_detail_clean
+group by venue, city
+
+select * from venue_dim
+
+insert into match_type_dim (match_type)
+select match_type
+from cricket.clean.match_detail_clean group by match_type
+
+select * from match_type_dim
+
+select * from player_dim
+
+select * from team_dim
+
+select * from venue_dim
+
+INSERT INTO date_dim
+WITH date_range AS (
+    SELECT 
+        MIN(event_date) AS start_date,
+        MAX(event_date) AS end_date
+    FROM Cricket.clean.match_detail_clean
+),
+dates AS (
+    SELECT 
+        DATEADD(DAY, SEQ4(), start_date) AS date
+    FROM TABLE(GENERATOR(ROWCOUNT => 10000)), date_range
+    WHERE DATEADD(DAY, SEQ4(), start_date) <= end_date
+)
+SELECT 
+    ROW_NUMBER() OVER (ORDER BY date) AS DateID,
+    date AS full_date,
+    EXTRACT(DAY FROM date) AS Day,
+    EXTRACT(MONTH FROM date) AS Month,
+    EXTRACT(YEAR FROM date) AS Year,
+    CASE WHEN EXTRACT(QUARTER FROM date) IN (1, 2, 3, 4) THEN EXTRACT(QUARTER FROM date) END AS Quarter,
+    DAYOFWEEKISO(date) AS DayOfWeek,
+    EXTRACT(DAY FROM date) AS DayOfMonth,
+    DAYOFYEAR(date) as DayOfYear,
+    DAYNAME(date) as DayOfWeekName,
+    CASE WHEN DAYNAME(date) IN ('Sat', 'Sun') THEN 1 ELSE 0 END AS IsWeekend
+FROM dates;
+
+select * from date_dim
+
+
+-- Match fact table
+CREATE or replace TABLE match_fact (
+    match_id INT PRIMARY KEY,
+    date_id INT NOT NULL,
+    referee_id INT NOT NULL,
+    team_a_id INT NOT NULL,
+    team_b_id INT NOT NULL,
+    match_type_id INT NOT NULL,
+    venue_id INT NOT NULL,
+    total_overs number(3),
+    balls_per_over number(1),
+
+    overs_played_by_team_a number(2),
+    bowls_played_by_team_a number(3),
+    extra_bowls_played_by_team_a number(3),
+    extra_runs_scored_by_team_a number(3),
+    fours_by_team_a number(3),
+    sixes_by_team_a number(3),
+    total_score_by_team_a number(3),
+    wicket_lost_by_team_a number(2),
+
+    overs_played_by_team_b number(2),
+    bowls_played_by_team_b number(3),
+    extra_bowls_played_by_team_b number(3),
+    extra_runs_scored_by_team_b number(3),
+    fours_by_team_b number(3),
+    sixes_by_team_b number(3),
+    total_score_by_team_b number(3),
+    wicket_lost_by_team_b number(2),
+
+    toss_winner_team_id int not null, 
+    toss_decision text not null, 
+    match_result text not null, 
+    winner_team_id int not null,
+
+    CONSTRAINT fk_date FOREIGN KEY (date_id) REFERENCES date_dim (date_id),
+    CONSTRAINT fk_referee FOREIGN KEY (referee_id) REFERENCES referee_dim (referee_id),
+    CONSTRAINT fk_team1 FOREIGN KEY (team_a_id) REFERENCES team_dim (team_id),
+    CONSTRAINT fk_team2 FOREIGN KEY (team_b_id) REFERENCES team_dim (team_id),
+    CONSTRAINT fk_match_type FOREIGN KEY (match_type_id) REFERENCES match_type_dim (match_type_id),
+    CONSTRAINT fk_venue FOREIGN KEY (venue_id) REFERENCES venue_dim (venue_id),
+
+    CONSTRAINT fk_toss_winner_team FOREIGN KEY (toss_winner_team_id) REFERENCES team_dim (team_id),
+    CONSTRAINT fk_winner_team FOREIGN KEY (winner_team_id) REFERENCES team_dim (team_id)
+);
+
+insert into cricket.consumption.match_fact 
+select 
+    m.match_type_number as match_id,
+    dd.date_id as date_id,
+    0 as referee_id,
+    ftd.team_id as first_team_id,
+    std.team_id as second_team_id,
+    mtd.match_type_id as match_type_id,
+    vd.venue_id as venue_id,
+    50 as total_overs,
+    6 as balls_per_overs,
+    max(case when d.team_name = m.first_team then  d.over else 0 end ) as OVERS_PLAYED_BY_TEAM_A,
+    sum(case when d.team_name = m.first_team then  1 else 0 end ) as balls_PLAYED_BY_TEAM_A,
+    sum(case when d.team_name = m.first_team then  d.extras else 0 end ) as extra_balls_PLAYED_BY_TEAM_A,
+    sum(case when d.team_name = m.first_team then  d.extra_runs else 0 end ) as extra_runs_scored_BY_TEAM_A,
+    0 fours_by_team_a,
+    0 sixes_by_team_a,
+    (sum(case when d.team_name = m.first_team then  d.runs else 0 end ) + sum(case when d.team_name = m.first_team then  d.extra_runs else 0 end ) ) as total_runs_scored_BY_TEAM_A,
+    sum(case when d.team_name = m.first_team and player_out is not null then  1 else 0 end ) as wicket_lost_by_team_a,    
+    
+    max(case when d.team_name = m.second_team then  d.over else 0 end ) as OVERS_PLAYED_BY_TEAM_B,
+    sum(case when d.team_name = m.second_team then  1 else 0 end ) as balls_PLAYED_BY_TEAM_B,
+    sum(case when d.team_name = m.second_team then  d.extras else 0 end ) as extra_balls_PLAYED_BY_TEAM_B,
+    sum(case when d.team_name = m.second_team then  d.extra_runs else 0 end ) as extra_runs_scored_BY_TEAM_B,
+    0 fours_by_team_b,
+    0 sixes_by_team_b,
+    (sum(case when d.team_name = m.second_team then  d.runs else 0 end ) + sum(case when d.team_name = m.second_team then  d.extra_runs else 0 end ) ) as total_runs_scored_BY_TEAM_B,
+    sum(case when d.team_name = m.second_team and player_out is not null then  1 else 0 end ) as wicket_lost_by_team_b,
+    tw.team_id as toss_winner_team_id,
+    m.toss_decision as toss_decision,
+    m.matach_result as matach_result,
+    mw.team_id as winner_team_id
+     
+from 
+    cricket.clean.match_detail_clean m
+    join date_dim dd on m.event_date = dd.full_dt
+    join team_dim ftd on m.first_team = ftd.team_name 
+    join team_dim std on m.second_team = std.team_name 
+    join match_type_dim mtd on m.match_type = mtd.match_type
+    join venue_dim vd on m.venue = vd.venue_name and m.city = vd.city
+    join cricket.clean.delivery_clean_tbl d  on d.match_type_number = m.match_type_number 
+    join team_dim tw on m.toss_winner = tw.team_name 
+    join team_dim mw on m.winner= mw.team_name 
+    --where m.match_type_number = 4686
+    group by
+        m.match_type_number,
+        date_id,
+        referee_id,
+        first_team_id,
+        second_team_id,
+        match_type_id,
+        venue_id,
+        total_overs,
+        toss_winner_team_id,
+        toss_decision,
+        matach_result,
+        winner_team_id
+        ;
+
+select * from match_fact order by match_id
+
+CREATE or replace TABLE delivery_fact (
+    match_id INT ,
+    team_id INT,
+    bowler_id INT,
+    batter_id INT,
+    non_striker_id INT,
+    over INT,
+    runs INT,
+    extra_runs INT,
+    extra_type VARCHAR(255),
+    player_out VARCHAR(255),
+    player_out_kind VARCHAR(255),
+
+    CONSTRAINT fk_del_match_id FOREIGN KEY (match_id) REFERENCES match_fact (match_id),
+    CONSTRAINT fk_del_team FOREIGN KEY (team_id) REFERENCES team_dim (team_id),
+    CONSTRAINT fk_bowler FOREIGN KEY (bowler_id) REFERENCES player_dim (player_id),
+    CONSTRAINT fk_batter FOREIGN KEY (batter_id) REFERENCES player_dim (player_id),
+    CONSTRAINT fk_stricker FOREIGN KEY (non_striker_id) REFERENCES player_dim (player_id)
+);
+
+-- insert record
+insert into delivery_fact
+select 
+    d.match_type_number as match_id,
+    td.team_id,
+    bpd.player_id as bower_id, 
+    spd.player_id batter_id, 
+    nspd.player_id as non_stricker_id,
+    d.over,
+    d.runs,
+    case when d.extra_runs is null then 0 else d.extra_runs end as extra_runs,
+    case when d.extra_type is null then 'None' else d.extra_type end as extra_type,
+    case when d.player_out is null then 'None' else d.player_out end as player_out,
+    case when d.player_out_kind is null then 'None' else d.player_out_kind end as player_out_kind
+from 
+    cricket.clean.delivery_clean_tbl d
+    join team_dim td on d.team_name = td.team_name
+    join player_dim bpd on d.bowler = bpd.player_name
+    join player_dim spd on d.batter = spd.player_name
+    join player_dim nspd on d.non_striker = nspd.player_name;
+
+select * from cricket.clean.delivery_clean_tbl where MATCH_TYPE_NUMBER = 4667
+
+select * from delivery_fact where match_id = 4667
+
+-- 2000 matches * 600 balls per match = 1,200,000
+
+
